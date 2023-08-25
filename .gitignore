@@ -1,0 +1,9 @@
+
+/sources/test_data/*
+/venv_osteo_labdig
+*.ld
+*.swp
+*~
+*.pyc
+
+
