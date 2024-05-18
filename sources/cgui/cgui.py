@@ -3,6 +3,8 @@ import open3d as o3d
 import open3d.visualization.gui as gui
 import open3d.visualization.rendering as rendering
 import platform
+import numpy as np
+import copy
 from measures import LDBox
 
 # custom GUI
@@ -10,14 +12,18 @@ class CGui:
     MENU_OPEN = 1
     MENU_BOX = 2
     MENU_QUIT = 3
+    MENU_RESET = 4
+    MENU_VOXEL01 = 5
+    MENU_VOXEL1 = 6
     MENU_ABOUT = 21
 
     def __init__(self, width, height):
         isMacOS = (platform.system() == "Darwin")
         self._cloud = None
-        self._obb = None
-        self._obbr = None
-
+        self._model = None
+        self._obbmin = None
+        self._obbmax = None
+        #self.settings = Settings()
         resource_path = gui.Application.instance.resource_path
         self.window = gui.Application.instance.create_window("Osteo LabDig", width, height)
         w = self.window  # to make the code more concise
@@ -25,6 +31,34 @@ class CGui:
         # 3D widget
         self._scene = gui.SceneWidget()
         self._scene.scene = rendering.Open3DScene(w.renderer)
+        self._material = rendering.MaterialRecord()
+        self._material.base_color =  [0.9, 0.9, 0.9, 1.0]
+        self._material.shader = "defaultLit"
+
+        em = w.theme.font_size
+        separation_height = int(round(0.5 * em))
+
+        ## ---- Panel ----
+        self._panel = gui.Vert(0, gui.Margins(0.25 * em, 0.25 * em, 0.25 * em, 0.25 * em))
+        view_ctrls = gui.CollapsableVert("Measures", 0.25 * em, gui.Margins(em, 0, 0, 0))
+        
+        self._min_box_0 = gui.Label("")
+        self._min_box_1 = gui.Label("")
+        self._min_box_2 = gui.Label("")
+        view_ctrls.add_child(gui.Label("Min box"))
+        view_ctrls.add_child(self._min_box_0)
+        view_ctrls.add_child(self._min_box_1)
+        view_ctrls.add_child(self._min_box_2)
+
+        self._max_box_0 = gui.Label("")
+        self._max_box_1 = gui.Label("")
+        self._max_box_2 = gui.Label("")
+        view_ctrls.add_child(gui.Label("Max box"))
+        view_ctrls.add_child(self._max_box_0)
+        view_ctrls.add_child(self._max_box_1)
+        view_ctrls.add_child(self._max_box_2)
+        
+        self._panel.add_child(view_ctrls)
 
         # ---- Menu ----
         # The menu is global (because the macOS menu is global), so only create
@@ -44,24 +78,30 @@ class CGui:
                 self._file_menu.add_item("Quit", CGui.MENU_QUIT)
 
             self._data_menu = gui.Menu()
-            self._data_menu.add_item("Box measure", CGui.MENU_BOX)
+            self._data_menu.add_item("Reset", CGui.MENU_RESET)
+            self._data_menu.add_item("Voxel 0.1", CGui.MENU_VOXEL01)
+            self._data_menu.add_item("Voxel 1", CGui.MENU_VOXEL1)
+
+            self._measures_menu = gui.Menu()
+            self._measures_menu.add_item("Box measure", CGui.MENU_BOX)
 
             self._help_menu = gui.Menu()
             self._help_menu.add_item("About", CGui.MENU_ABOUT)
             self._menu = gui.Menu()
+
+            self._menu.add_menu("File", self._file_menu)
+            self._menu.add_menu("Data", self._data_menu)
+            self._menu.add_menu("Measures", self._measures_menu)
 
             if isMacOS:
                 # macOS will name the first menu item for the running application
                 # (in our case, probably "Python"), regardless of what we call
                 # it. This is the application menu, and it is where the
                 # About..., Preferences..., and Quit menu items typically go.
-                self._menu.add_menu("File", self._file_menu)
-                self._menu.add_menu("Data", self._data_menu)
                 # Don't include help menu unless it has something more than
                 # About...
+                pass
             else:
-                self._menu.add_menu("File", self._file_menu)
-                self._menu.add_menu("Data", self._data_menu)
                 self._menu.add_menu("Help", self._help_menu)
             gui.Application.instance.menubar = self._menu
 
@@ -70,16 +110,42 @@ class CGui:
         # menu item is activated.
         w.set_on_menu_item_activated(CGui.MENU_OPEN, self._on_menu_open)
         w.set_on_menu_item_activated(CGui.MENU_BOX, self._on_menu_box)
+        w.set_on_menu_item_activated(CGui.MENU_RESET, self._on_menu_reset)
+        w.set_on_menu_item_activated(CGui.MENU_VOXEL01, self._on_menu_voxel01)
+        w.set_on_menu_item_activated(CGui.MENU_VOXEL1, self._on_menu_voxel1)
         w.set_on_menu_item_activated(CGui.MENU_QUIT, self._on_menu_quit)
         w.set_on_menu_item_activated(CGui.MENU_ABOUT, self._on_menu_about)
-        self._enable_cloud_menus(False)
+        self._enable_measures_menus(False)
+        self._enable_data_menus(False)
         # ----
 
+        w.set_on_layout(self._on_layout)
         w.add_child(self._scene)
+        w.add_child(self._panel)
 
 
-    def _enable_cloud_menus(self, enabled: bool):
-        self._data_menu.set_enabled(CGui.MENU_BOX, enabled)
+    def _on_layout(self, layout_context):
+        # The on_layout callback should set the frame (position + size) of every
+        # child correctly. After the callback is done the window will layout
+        # the grandchildren.
+        r = self.window.content_rect
+        self._scene.frame = r
+        width = 17 * layout_context.theme.font_size
+        height = min(
+            r.height,
+            self._panel.calc_preferred_size(layout_context, gui.Widget.Constraints()).height
+        )
+        self._panel.frame = gui.Rect(r.get_right() - width, r.y, width, height)
+
+
+    def _enable_measures_menus(self, enabled: bool):
+        self._measures_menu.set_enabled(CGui.MENU_BOX, enabled)
+
+
+    def _enable_data_menus(self, enabled: bool):
+        self._data_menu.set_enabled(CGui.MENU_RESET, enabled)
+        self._data_menu.set_enabled(CGui.MENU_VOXEL01, enabled)
+        self._data_menu.set_enabled(CGui.MENU_VOXEL1, enabled)
 
 
     def _on_load_dialog_done(self, filename):
@@ -90,46 +156,10 @@ class CGui:
     def load(self, path):
         self._scene.scene.clear_geometry()
         self._cloud = None
-        self._obb = None
-        self._obbr = None
+        self._model = None
+        self._obbmin = None
+        self._obbmax = None
 
-#        geometry = None
-#        geometry_type = o3d.io.read_file_geometry_type(path)
-#
-#        mesh = None
-#        if geometry_type & o3d.io.CONTAINS_TRIANGLES:
-#            mesh = o3d.io.read_triangle_model(path)
-#        if mesh is None:
-#            print("[Info]", path, "appears to be a point cloud")
-#            cloud = None
-#            try:
-#                cloud = o3d.io.read_point_cloud(path)
-#            except Exception:
-#                pass
-#            if cloud is not None:
-#                print("[Info] Successfully read", path)
-#                if not cloud.has_normals():
-#                    cloud.estimate_normals()
-#                cloud.normalize_normals()
-#                geometry = cloud
-#            else:
-#                print("[WARNING] Failed to read points", path)
-#
-#        if geometry is not None or mesh is not None:
-#            try:
-#                if mesh is not None:
-#                    # Triangle model
-#                    self._scene.scene.add_model("__model__", mesh)
-#                else:
-#                    # Point cloud
-#                    self._scene.scene.add_geometry("__model__", geometry,
-#                                                   self.settings.material)
-#                bounds = self._scene.scene.bounding_box
-#                self._scene.setup_camera(60, bounds, bounds.get_center())
-#            except Exception as e:
-#                print(e)
-
-        self._cloud = None
         try:
             self._cloud = o3d.io.read_point_cloud(path, "xyzn")
         except Exception:
@@ -162,15 +192,19 @@ class CGui:
                 materials[NORMALS].shader = NORMALS
                 materials[DEPTH].shader = DEPTH
 
-                material = rendering.MaterialRecord()
-                material.base_color =  [0.9, 0.9, 0.9, 1.0]
-                material.shader = "defaultLit"
-
-                #self._cloud = self._cloud.voxel_down_sample(voxel_size=1)
-                self._scene.scene.add_geometry("__model___", self._cloud, material)
+                #self._cloud = self._cloud.voxel_down_sample(voxel_size=0.1)
+                #print(self._cloud.get_center())
+                #origin = np.array([0, 0, 0], dtype=np.float64)
+                #self._cloud = self._cloud.translate(origin, True)
+                self._cloud = self._cloud.translate((0, 0, 0), relative=False)
+                self._cloud = self._cloud.remove_duplicated_points()
+                #print(self._cloud.get_center())
+                self._model = copy.deepcopy(self._cloud)
+                self._scene.scene.add_geometry("__model___", self._model, self._material)
                 bounds = self._scene.scene.bounding_box
                 self._scene.setup_camera(60, bounds, bounds.get_center())
-                self._enable_cloud_menus(True)
+                self._enable_measures_menus(True)
+                self._enable_data_menus(True)
             except Exception as e:
                 print(e)
 
@@ -181,27 +215,6 @@ class CGui:
 
     def _on_menu_open(self):
         dlg = gui.FileDialog(gui.FileDialog.OPEN, "Choose file to load",self.window.theme)
-#        dlg.add_filter(
-#            ".ply .stl .fbx .obj .off .gltf .glb",
-#            "Triangle mesh files (.ply, .stl, .fbx, .obj, .off, "
-#            ".gltf, .glb)")
-#        dlg.add_filter(
-#            ".xyz .xyzn .xyzrgb .ply .pcd .pts",
-#            "Point cloud files (.xyz, .xyzn, .xyzrgb, .ply, "
-#            ".pcd, .pts)")
-#        dlg.add_filter(".ply", "Polygon files (.ply)")
-#        dlg.add_filter(".stl", "Stereolithography files (.stl)")
-#        dlg.add_filter(".fbx", "Autodesk Filmbox files (.fbx)")
-#        dlg.add_filter(".obj", "Wavefront OBJ files (.obj)")
-#        dlg.add_filter(".off", "Object file format (.off)")
-#        dlg.add_filter(".gltf", "OpenGL transfer files (.gltf)")
-#        dlg.add_filter(".glb", "OpenGL binary transfer files (.glb)")
-#        dlg.add_filter(".xyz", "ASCII point cloud files (.xyz)")
-#        dlg.add_filter(".xyzn", "ASCII point cloud with normals (.xyzn)")
-#        dlg.add_filter(".xyzrgb", "ASCII point cloud files with colors (.xyzrgb)")
-#        dlg.add_filter(".pcd", "Point Cloud Data files (.pcd)")
-#        dlg.add_filter(".pts", "3D Points files (.pts)")
-#        dlg.add_filter("", "All files")
         dlg.add_filter(".ld", "3D xyzn file (.ld)")
 
         # A file dialog MUST define on_cancel and on_done functions
@@ -214,25 +227,60 @@ class CGui:
         gui.Application.instance.quit()
 
 
-    def box_measure(self):
+    def _on_menu_reset(self):
         if self._cloud is not None:
-            box = LDBox(self._cloud)
+            self._scene.scene.clear_geometry()
+            self._model = copy.deepcopy(self._cloud)
+            self._scene.scene.add_geometry("__model___", self._model, self._material)
+
+
+    def _on_menu_voxel01(self):
+        if self._cloud is not None:
+            self._scene.scene.clear_geometry()
+            self._model = copy.deepcopy(self._cloud)
+            self._model = self._model.voxel_down_sample(voxel_size=0.1)
+            self._scene.scene.add_geometry("__model___", self._model, self._material)
+
+
+    def _on_menu_voxel1(self):
+        if self._cloud is not None:
+            self._scene.scene.clear_geometry()
+            self._model = copy.deepcopy(self._cloud)
+            self._model = self._model.voxel_down_sample(voxel_size=1)
+            self._scene.scene.add_geometry("__model___", self._model, self._material)
+
+
+    def box_measure(self):
+        if self._model is not None:
+            box = LDBox(self._model)
             boxes = box.run()
-            self._obb = boxes["obb"]
-            self._obbr = boxes["obbr"]
-            # aabb = self._cloud.get_axis_aligned_bounding_box()
-            #obb = self._cloud.get_oriented_bounding_box()
+            self._obbmin = boxes["obbmin"]
+            self._obbmax = boxes["obbmax"]
             material = rendering.MaterialRecord()
             material.base_color =  [1, 1, 0, 1.0]
             material.shader = "defaultLit"
-            self._scene.scene.add_geometry("__obbr___", self._obbr, material)
+            self._scene.scene.add_geometry("__obbmin___", self._obbmin, material)
             material.base_color =  [0, 0, 1, 1.0]
             material.shader = "defaultLit"
-            self._scene.scene.add_geometry("__obb___", self._obb, material)
+            self._scene.scene.add_geometry("__obbmax___", self._obbmax, material)
+            print(self._obbmin)
+            print(self._obbmax)
+            extent = self._obbmin.extent
+            self._min_box_0.text = str(extent[0])
+            self._min_box_1.text = str(extent[1])
+            self._min_box_2.text = str(extent[2])
+            extent = self._obbmax.extent
+            self._max_box_0.text = str(extent[0])
+            self._max_box_1.text = str(extent[1])
+            self._max_box_2.text = str(extent[2])
 
 
     def _on_menu_box(self):
         self.box_measure()
+
+
+    def _on_about_ok(self):
+        self.window.close_dialog()
 
 
     def _on_menu_about(self):
