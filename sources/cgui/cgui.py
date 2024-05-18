@@ -15,6 +15,7 @@ class CGui:
     MENU_RESET = 4
     MENU_VOXEL01 = 5
     MENU_VOXEL1 = 6
+    MENU_MODEL125 = 7
     MENU_ABOUT = 21
 
     def __init__(self, width, height):
@@ -45,7 +46,7 @@ class CGui:
         self._min_box_0 = gui.Label("")
         self._min_box_1 = gui.Label("")
         self._min_box_2 = gui.Label("")
-        view_ctrls.add_child(gui.Label("Min box"))
+        view_ctrls.add_child(gui.Label("Min box (yellow)"))
         view_ctrls.add_child(self._min_box_0)
         view_ctrls.add_child(self._min_box_1)
         view_ctrls.add_child(self._min_box_2)
@@ -53,7 +54,7 @@ class CGui:
         self._max_box_0 = gui.Label("")
         self._max_box_1 = gui.Label("")
         self._max_box_2 = gui.Label("")
-        view_ctrls.add_child(gui.Label("Max box"))
+        view_ctrls.add_child(gui.Label("Max box (blue)"))
         view_ctrls.add_child(self._max_box_0)
         view_ctrls.add_child(self._max_box_1)
         view_ctrls.add_child(self._max_box_2)
@@ -85,6 +86,9 @@ class CGui:
             self._measures_menu = gui.Menu()
             self._measures_menu.add_item("Box measure", CGui.MENU_BOX)
 
+            self._generators_menu = gui.Menu()
+            self._generators_menu.add_item("model 12.5", CGui.MENU_MODEL125)
+
             self._help_menu = gui.Menu()
             self._help_menu.add_item("About", CGui.MENU_ABOUT)
             self._menu = gui.Menu()
@@ -92,6 +96,7 @@ class CGui:
             self._menu.add_menu("File", self._file_menu)
             self._menu.add_menu("Data", self._data_menu)
             self._menu.add_menu("Measures", self._measures_menu)
+            self._menu.add_menu("Generators", self._generators_menu)
 
             if isMacOS:
                 # macOS will name the first menu item for the running application
@@ -113,6 +118,7 @@ class CGui:
         w.set_on_menu_item_activated(CGui.MENU_RESET, self._on_menu_reset)
         w.set_on_menu_item_activated(CGui.MENU_VOXEL01, self._on_menu_voxel01)
         w.set_on_menu_item_activated(CGui.MENU_VOXEL1, self._on_menu_voxel1)
+        w.set_on_menu_item_activated(CGui.MENU_MODEL125, self._on_menu_model125)
         w.set_on_menu_item_activated(CGui.MENU_QUIT, self._on_menu_quit)
         w.set_on_menu_item_activated(CGui.MENU_ABOUT, self._on_menu_about)
         self._enable_measures_menus(False)
@@ -122,6 +128,23 @@ class CGui:
         w.set_on_layout(self._on_layout)
         w.add_child(self._scene)
         w.add_child(self._panel)
+
+        UNLIT = "defaultUnlit"
+        LIT = "defaultLit"
+        NORMALS = "normals"
+        DEPTH = "depth"
+        materials = {
+            LIT: rendering.MaterialRecord(),
+            UNLIT: rendering.MaterialRecord(),
+            NORMALS: rendering.MaterialRecord(),
+            DEPTH: rendering.MaterialRecord()
+        }
+        materials[LIT].base_color = [0.9, 0.9, 0.9, 1.0]
+        materials[LIT].shader = LIT
+        materials[UNLIT].base_color = [0.9, 0.9, 0.9, 1.0]
+        materials[UNLIT].shader = UNLIT
+        materials[NORMALS].shader = NORMALS
+        materials[DEPTH].shader = DEPTH
 
 
     def _on_layout(self, layout_context):
@@ -175,22 +198,24 @@ class CGui:
         
         if self._cloud is not None:
             try:
-                UNLIT = "defaultUnlit"
-                LIT = "defaultLit"
-                NORMALS = "normals"
-                DEPTH = "depth"
-                materials = {
-                    LIT: rendering.MaterialRecord(),
-                    UNLIT: rendering.MaterialRecord(),
-                    NORMALS: rendering.MaterialRecord(),
-                    DEPTH: rendering.MaterialRecord()
-                }
-                materials[LIT].base_color = [0.9, 0.9, 0.9, 1.0]
-                materials[LIT].shader = LIT
-                materials[UNLIT].base_color = [0.9, 0.9, 0.9, 1.0]
-                materials[UNLIT].shader = UNLIT
-                materials[NORMALS].shader = NORMALS
-                materials[DEPTH].shader = DEPTH
+               # OK
+               # UNLIT = "defaultUnlit"
+               # LIT = "defaultLit"
+               # NORMALS = "normals"
+               # DEPTH = "depth"
+               # materials = {
+               #     LIT: rendering.MaterialRecord(),
+               #     UNLIT: rendering.MaterialRecord(),
+               #     NORMALS: rendering.MaterialRecord(),
+               #     DEPTH: rendering.MaterialRecord()
+               # }
+               # materials[LIT].base_color = [0.9, 0.9, 0.9, 1.0]
+               # materials[LIT].shader = LIT
+               # materials[UNLIT].base_color = [0.9, 0.9, 0.9, 1.0]
+               # materials[UNLIT].shader = UNLIT
+               # materials[NORMALS].shader = NORMALS
+               # materials[DEPTH].shader = DEPTH
+               # ok
 
                 #self._cloud = self._cloud.voxel_down_sample(voxel_size=0.1)
                 #print(self._cloud.get_center())
@@ -248,6 +273,38 @@ class CGui:
             self._model = copy.deepcopy(self._cloud)
             self._model = self._model.voxel_down_sample(voxel_size=1)
             self._scene.scene.add_geometry("__model___", self._model, self._material)
+
+
+    def _on_menu_model125(self):
+        self._scene.scene.clear_geometry()
+        self._cloud = o3d.geometry.PointCloud()
+        #self._cloud.points = o3d.utility.Vector3dVector(np.random.rand(500,3))
+        #points = np.array([[-1, -1, -1],
+       #           [1, -1, -1 ],
+       #           [1, 1, -1],
+       #           [-1, 1, -1],
+       #           [-1, -1, 1],
+       #           [1, -1, 1 ],
+       #           [1, 1, 1],
+       #           [-1, 1, 1]])
+        points = np.array([[0, 0, 0]])
+        for x in range(0, 10):
+            for y in range(0, 10):
+                if x!=0 or y!=0:
+                    points = np.append(points, [[x, y, 0]], axis = 0)
+        for x in range(0, 10):
+            for z in range(0, 10):
+                if x!=0 or z!=0:
+                    points = np.append(points, [[x, 0, z]], axis = 0)
+        print(points)
+        self._cloud.points = o3d.utility.Vector3dVector(points)
+        if not self._cloud.has_normals():
+            self._cloud.estimate_normals()
+        self._cloud.normalize_normals()
+        self._model = copy.deepcopy(self._cloud)
+        self._scene.scene.add_geometry("__model___", self._model, self._material)
+        bounds = self._scene.scene.bounding_box
+        self._scene.setup_camera(60, bounds, bounds.get_center())
 
 
     def box_measure(self):
